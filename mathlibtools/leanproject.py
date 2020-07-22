@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -159,6 +160,22 @@ def parse_project_name(name: str, ssh: bool = True) -> Tuple[str, str, str]:
 
     return name, url, branch
 
+def get_github_key_filename():
+    ssh_config = paramiko.SSHConfig()
+    ssh_config_paths = [os.path.expanduser("~/.ssh/config"), '/etc/ssh/ssh_config']
+
+    for config_path in ssh_config_paths:
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                ssh_config.parse(f)
+
+    user_config = ssh_config.lookup('github.com')
+    key_filename = None
+    if 'identityfile' in user_config:
+        key_filename = os.path.expanduser(user_config['identityfile'][0])
+
+    return key_filename
+
 @cli.command(name='get')
 @click.argument('name')
 @click.argument('directory', default='')
@@ -177,18 +194,20 @@ def get_project(name: str, new_branch: bool, directory: str = '') -> None:
     branch, pass the `-b` option."""
 
     # check whether we can ssh into GitHub
+    key_filename = get_github_key_filename()
     try:
         assert PARAMIKO_OK
         client = paramiko.client.SSHClient()
         client.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
-        client.connect('github.com', username='git')
+        client.connect('github.com', username='git', key_filename=key_filename)
         client.close()
         ssh = True
     except paramiko.PasswordRequiredException:
-        password = getpass('Please provide password for encrypted SSH private key: ')
+        password = getpass('Please provide password for encrypted SSH private key {}: '
+                           .format('' if not key_filename else key_filename))
         client = paramiko.client.SSHClient()
         client.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
-        client.connect('github.com', username='git', password=password)
+        client.connect('github.com', username='git', password=password, key_filename=key_filename)
         client.close()
         ssh = True
     except (AssertionError, AuthenticationException, SSHException):
